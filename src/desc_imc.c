@@ -31,17 +31,17 @@
 #include <at.h>
 #include <server.h>
 
-#include "s_network.h"
-#include "s_modem.h"
-#include "s_sim.h"
-#include "s_sap.h"
-#include "s_ps.h"
-#include "s_call.h"
-#include "s_ss.h"
-#include "s_sms.h"
-#include "s_sat.h"
-#include "s_phonebook.h"
-#include "s_gps.h"
+#include "imc_network.h"
+#include "imc_modem.h"
+#include "imc_sim.h"
+#include "imc_sap.h"
+#include "imc_ps.h"
+#include "imc_call.h"
+#include "imc_ss.h"
+#include "imc_sms.h"
+#include "imc_sat.h"
+#include "imc_phonebook.h"
+#include "imc_gps.h"
 
 static void on_confirmation_modem_message_send(TcorePending *p,
 						gboolean result,
@@ -109,140 +109,140 @@ static void _modem_subscribe_events(TcorePlugin *plugin)
 	/* XSIMSTATE  */
 	tcore_prepare_and_send_at_request(co_sim, "at+xsimstate=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** CALL subscriptions ******/
 	/* XCALLSTAT */
 	tcore_prepare_and_send_at_request(co_call, "at+xcallstat=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* CSSN */
 	tcore_prepare_and_send_at_request(co_call, "at+cssn=1,1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* CUSD */
 	tcore_prepare_and_send_at_request(co_call, "at+cusd=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* CLIP */
 	tcore_prepare_and_send_at_request(co_call, "at+clip=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** NETWORK subscriptions ******/
 	/* CREG */
 	tcore_prepare_and_send_at_request(co_network, "at+creg=2", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* CGREG */
 	tcore_prepare_and_send_at_request(co_network, "at+cgreg=2", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* Allow Automatic Time Zone updation via NITZ */
 	tcore_prepare_and_send_at_request(co_network, "at+ctzu=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* TZ, Time & Daylight changing event reporting Subscription */
 	tcore_prepare_and_send_at_request(co_network, "at+ctzr=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* XMER */
 	tcore_prepare_and_send_at_request(co_network, "at+xmer=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** PS subscriptions ******/
 	/* CGEREP */
 	tcore_prepare_and_send_at_request(co_ps, "at+cgerep=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* XDATASTAT */
 	tcore_prepare_and_send_at_request(co_ps, "at+xdatastat=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 
 	/* XDNS */
 	tcore_prepare_and_send_at_request(co_ps, "at+xdns=1,1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* CMEE */
 	tcore_prepare_and_send_at_request(co_ps, "at+cmee=2", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** SMS subscriptions ******/
 	/* CMEE */
 	tcore_prepare_and_send_at_request(co_sms, "at+cmee=2", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* Incoming SMS, Cell Broadcast, Status Report Subscription */
 	tcore_prepare_and_send_at_request(co_sms, "at+cnmi=1,2,2,1,0", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/* Text/PDU mode Subscription */
 	tcore_prepare_and_send_at_request(co_sms, "at+cmgf=0", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** GPS subscriptions ******/
 	/* AGPS- Assist Data and Reset Assist Data Subscription */
 	tcore_prepare_and_send_at_request(co_gps, "at+cposr=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	tcore_prepare_and_send_at_request(co_gps, "at+xcposr=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	/****** SAP subscriptions ******/
 	/* XBCSTAT */
 	tcore_prepare_and_send_at_request(co_sap, "at+xbcstat=1", NULL, TCORE_AT_NO_RESULT, NULL,
 						on_response_last_bootup_subscription, NULL,
-						on_confirmation_modem_message_send, NULL);
+						on_confirmation_modem_message_send, NULL, 0, NULL, NULL);
 
 	dbg("Exit");
 }
 
 /* Initializer Table */
 struct object_initializer init_table = {
-	.modem_init = s_modem_init,
-	.sim_init = s_sim_init,
-	.sat_init = s_sat_init,
-	.sap_init = s_sap_init,
-	.network_init = s_network_init,
-	.ps_init = s_ps_init,
-	.call_init = s_call_init,
-	.ss_init = s_ss_init,
-	.sms_init = s_sms_init,
-	.phonebook_init = s_phonebook_init,
-	.gps_init = s_gps_init,
+	.modem_init = imc_modem_init,
+	.sim_init = imc_sim_init,
+	.sat_init = imc_sat_init,
+	.sap_init = imc_sap_init,
+	.network_init = imc_network_init,
+	.ps_init = imc_ps_init,
+	.call_init = imc_call_init,
+	.ss_init = imc_ss_init,
+	.sms_init = imc_sms_init,
+	.phonebook_init = imc_phonebook_init,
+	.gps_init = imc_gps_init,
 };
 
 /* Deinitializer Table */
 struct object_deinitializer deinit_table = {
-	.modem_deinit = s_modem_exit,
-	.sim_deinit = s_sim_exit,
-	.sat_deinit = s_sat_exit,
-	.sap_deinit = s_sap_exit,
-	.network_deinit = s_network_exit,
-	.ps_deinit = s_ps_exit,
-	.call_deinit = s_call_exit,
-	.ss_deinit = s_ss_exit,
-	.sms_deinit = s_sms_exit,
-	.phonebook_deinit = s_phonebook_exit,
-	.gps_deinit = s_gps_exit,
+	.modem_deinit = imc_modem_exit,
+	.sim_deinit = imc_sim_exit,
+	.sat_deinit = imc_sat_exit,
+	.sap_deinit = imc_sap_exit,
+	.network_deinit = imc_network_exit,
+	.ps_deinit = imc_ps_exit,
+	.call_deinit = imc_call_exit,
+	.ss_deinit = imc_ss_exit,
+	.sms_deinit = imc_sms_exit,
+	.phonebook_deinit = imc_phonebook_exit,
+	.gps_deinit = imc_gps_exit,
 };
 
 static gboolean on_load()

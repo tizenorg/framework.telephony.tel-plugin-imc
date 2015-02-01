@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Hayoon Ko <hayoon.ko@samsung.com>
+ * Contact: Sharanayya Mathapati <sharan.m@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef S_SAP_H_
-#define S_SAP_H_
+#ifndef __IMC_CALL_H__
+#define __IMC_CALL_H__
 
-gboolean s_sap_init(TcorePlugin *cp, CoreObject *co_sap);
-void s_sap_exit(TcorePlugin *cp, CoreObject *co_sap);
+gboolean imc_call_init(TcorePlugin *cp, CoreObject *co_call);
+void imc_call_exit(TcorePlugin *cp, CoreObject *co_call);
 
-#endif /* S_SAP_H_ */
+#endif	// __IMC_CALL_H__

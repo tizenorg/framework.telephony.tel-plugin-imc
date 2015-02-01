@@ -32,11 +32,11 @@
 #include <user_request.h>
 #include <at.h>
 
-#include "s_common.h"
-#include "s_sat.h"
+#include "imc_common.h"
+#include "imc_sat.h"
 #define ENVELOPE_CMD_LEN        256
 
-static TReturn s_terminal_response(CoreObject *o, UserRequest *ur);
+static TReturn imc_terminal_response(CoreObject *o, UserRequest *ur);
 static void on_confirmation_sat_message_send(TcorePending *p, gboolean result, void *user_data);      // from Kernel
 
 static void on_confirmation_sat_message_send(TcorePending *p, gboolean result, void *user_data)
@@ -241,7 +241,7 @@ static void on_response_envelop_cmd(TcorePending *p, int data_len, const void *d
 	GSList *tokens = NULL;
 	struct                      tresp_sat_envelop_data res;
 	const char *line = NULL;
-	const char *env_res = NULL;
+	//const char *env_res = NULL;
 	int sw2 = -1;
 
 	ur = tcore_pending_ref_user_request(p);
@@ -267,7 +267,7 @@ static void on_response_envelop_cmd(TcorePending *p, int data_len, const void *d
 				return;
 			}
 		}
-		env_res = g_slist_nth_data(tokens, 0);
+		//env_res = g_slist_nth_data(tokens, 0);
 		res.result = 0x8000;
 		res.envelop_resp = ENVELOPE_SUCCESS;
 		dbg("RESPONSE OK 3");
@@ -320,7 +320,7 @@ static void on_response_terminal_response(TcorePending *p, int data_len, const v
 	dbg("Function Exit");
 }
 
-static TReturn s_envelope(CoreObject *o, UserRequest *ur)
+static TReturn imc_envelope(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req = NULL;
@@ -374,7 +374,7 @@ static TReturn s_envelope(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static TReturn s_terminal_response(CoreObject *o, UserRequest *ur)
+static TReturn imc_terminal_response(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal = NULL;
 	TcoreATRequest *req = NULL;
@@ -384,13 +384,11 @@ static TReturn s_terminal_response(CoreObject *o, UserRequest *ur)
 	int proactive_resp_len = 0;
 	char proactive_resp[ENVELOPE_CMD_LEN];
 	char proactive_resphex[ENVELOPE_CMD_LEN * 2];
-	char *pbuffer = NULL;
 	int i = 0;
 	char *hexString = NULL;
 
 	dbg("Function Entry");
 	memset(&proactive_resphex, 0x00, sizeof(proactive_resphex));
-	pbuffer = proactive_resphex;
 	hal = tcore_object_get_hal(o);
 	if(FALSE == tcore_hal_get_power_state(hal)){
 		dbg("cp not ready/n");
@@ -404,6 +402,7 @@ static TReturn s_terminal_response(CoreObject *o, UserRequest *ur)
 	dbg("proactive_resp %s", proactive_resp);
 	dbg("proactive_resp length %d", strlen(proactive_resp));
 	if (proactive_resp_len == 0) {
+		tcore_pending_free(pending);
 		return TCORE_RETURN_EINVAL;
 	}
 	hexString = calloc((proactive_resp_len * 2) + 1, 1);
@@ -436,31 +435,33 @@ static TReturn s_terminal_response(CoreObject *o, UserRequest *ur)
 	tcore_hal_send_request(hal, pending);
 
 	g_free(cmd_str);
+	g_free(hexString);
 	dbg("Function Exit");
 	return TCORE_RETURN_SUCCESS;
 }
 
 static struct tcore_sat_operations sat_ops = {
-	.envelope = s_envelope,
-	.terminal_response = s_terminal_response,
+	.envelope = imc_envelope,
+	.terminal_response = imc_terminal_response,
 };
 
-gboolean s_sat_init(TcorePlugin *cp, CoreObject *co_sat)
+gboolean imc_sat_init(TcorePlugin *cp, CoreObject *co_sat)
 {
 	dbg("Entry");
 
-	tcore_sat_override_ops(co_sat, &sat_ops);
+	/* Set operations */
+	tcore_sat_set_ops(co_sat, &sat_ops);
 
-	tcore_object_override_callback(co_sat, "+SATI", on_event_sat_proactive_command, NULL);
-	tcore_object_override_callback(co_sat, "+SATN", on_event_sat_proactive_command, NULL);
-	tcore_object_override_callback(co_sat, "+SATF", on_response_terminal_response_confirm, NULL);
+	tcore_object_add_callback(co_sat, "+SATI", on_event_sat_proactive_command, NULL);
+	tcore_object_add_callback(co_sat, "+SATN", on_event_sat_proactive_command, NULL);
+	tcore_object_add_callback(co_sat, "+SATF", on_response_terminal_response_confirm, NULL);
 
 	dbg("Exit");
 
 	return TRUE;
 }
 
-void s_sat_exit(TcorePlugin *cp, CoreObject *co_sat)
+void imc_sat_exit(TcorePlugin *cp, CoreObject *co_sat)
 {
 	dbg("Exit");
 }

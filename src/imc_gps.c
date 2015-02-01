@@ -41,8 +41,8 @@
 #include <libxml/parser.h>
 #include <libxml/tree.h>
 
-#include "s_common.h"
-#include "s_gps.h"
+#include "imc_common.h"
+#include "imc_gps.h"
 
 
 #define FILE_NAME   "/opt/home/root/sample.xml"
@@ -2094,21 +2094,22 @@ static struct tcore_gps_operations gps_ops = {
 	.confirm_measure_pos = gps_confirm_measure_pos,
 };
 
-gboolean s_gps_init(TcorePlugin *cp, CoreObject *co_gps)
+gboolean imc_gps_init(TcorePlugin *cp, CoreObject *co_gps)
 {
 	dbg("Enter");
 
-	tcore_gps_override_ops(co_gps, &gps_ops);
+	/* Set operations */
+	tcore_gps_set_ops(co_gps, &gps_ops);
 
-	tcore_object_override_callback(co_gps, "+CPOSR", on_notification_gps_assist_data, NULL);
-	tcore_object_override_callback(co_gps, "+XCPOSR", on_notification_reset_assist_data, NULL);
+	tcore_object_add_callback(co_gps, "+CPOSR", on_notification_gps_assist_data, NULL);
+	tcore_object_add_callback(co_gps, "+XCPOSR", on_notification_reset_assist_data, NULL);
 
 	dbg("Exit");
 
 	return TRUE;
 }
 
-void s_gps_exit(TcorePlugin *cp, CoreObject *co_gps)
+void imc_gps_exit(TcorePlugin *cp, CoreObject *co_gps)
 {
 	dbg("Exit");
 }

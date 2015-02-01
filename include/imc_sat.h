@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Ja-young Gu <jygu@samsung.com>
+ * Contact: Harish Bishnoi <hbishnoi@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@
  * limitations under the License.
  */
 
-#ifndef __S_DISPATCH_H__
-#define __S_DISPATCH_H__
 
-void do_factory(TcoreHal *h, const ipc_message_type *ipc);
-void do_notification_message(TcorePlugin *p, const ipc_message_type *ipc);
-void do_notification_sys_message(TcorePlugin *p, const void *data);
+#ifndef __IMC_SAT_H__
+#define __IMC_SAT_H__
 
-#endif
+gboolean imc_sat_init(TcorePlugin *cp, CoreObject *co_sat);
+void imc_sat_exit(TcorePlugin *cp, CoreObject *co_sat);
+
+#endif /* __IMC_SAT_H__ */

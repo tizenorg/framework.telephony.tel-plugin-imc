@@ -33,8 +33,8 @@
 #include <server.h>
 #include <at.h>
 
-#include "s_common.h"
-#include "s_sap.h"
+#include "imc_common.h"
+#include "imc_sap.h"
 
 
 static void on_confirmation_sap_message_send(TcorePending *p, gboolean result, void *user_data)
@@ -527,7 +527,7 @@ static void on_response_get_cardreader_status(TcorePending *p, int data_len, con
 	dbg(" Function exit");
 }
 
-static	TReturn s_connect(CoreObject *o, UserRequest *ur)
+static	TReturn imc_connect(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
@@ -565,13 +565,13 @@ static	TReturn s_connect(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static	TReturn s_disconnect(CoreObject *o, UserRequest *ur)
+static	TReturn imc_disconnect(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
 	TcorePending *pending = NULL;
 	char *cmd_str = NULL;
-	const struct treq_sap_req_disconnect *req_data;
+	//const struct treq_sap_req_disconnect *req_data;
 
 	dbg(" Function entry");
 	if (!o || !ur)
@@ -582,7 +582,7 @@ static	TReturn s_disconnect(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_ENOSYS;
 	}
 
-	req_data = tcore_user_request_ref_data(ur, NULL);
+	//req_data = tcore_user_request_ref_data(ur, NULL);
 
 	cmd_str = g_strdup_printf("AT+ XBDISC");
 
@@ -602,13 +602,13 @@ static	TReturn s_disconnect(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static TReturn s_req_status(CoreObject *o, UserRequest *ur)
+static TReturn imc_req_status(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
 	TcorePending *pending = NULL;
 	char *cmd_str = NULL;
-	const struct treq_sap_req_status *req_data;
+	//const struct treq_sap_req_status *req_data;
 
 	dbg(" Function entry");
 	if (!o || !ur)
@@ -619,7 +619,7 @@ static TReturn s_req_status(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_ENOSYS;
 	}
 
-	req_data = tcore_user_request_ref_data(ur, NULL);
+	//req_data = tcore_user_request_ref_data(ur, NULL);
 
 	//cmd_str = g_strdup_printf("");//ToDo - No AT command present.
 
@@ -639,13 +639,13 @@ static TReturn s_req_status(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static TReturn s_set_transport_protocol(CoreObject *o, UserRequest *ur)
+static TReturn imc_set_transport_protocol(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
 	TcorePending *pending = NULL;
 	char *cmd_str = NULL;
-	const struct treq_sap_set_protocol *req_data;
+	//const struct treq_sap_set_protocol *req_data;
 
 	dbg(" Function entry");
 	if (!o || !ur)
@@ -656,7 +656,7 @@ static TReturn s_set_transport_protocol(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_ENOSYS;
 	}
 
-	req_data = tcore_user_request_ref_data(ur, NULL);
+	//req_data = tcore_user_request_ref_data(ur, NULL);
 
 	//cmd_str = g_strdup_printf("");//ToDo - No AT command present.
 
@@ -676,7 +676,7 @@ static TReturn s_set_transport_protocol(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static	TReturn s_set_power(CoreObject *o, UserRequest *ur)
+static	TReturn imc_set_power(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
@@ -724,13 +724,13 @@ static	TReturn s_set_power(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static	TReturn s_get_atr(CoreObject *o, UserRequest *ur)
+static	TReturn imc_get_atr(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
 	TcorePending *pending = NULL;
 	char *cmd_str = NULL;
-	const struct treq_sap_req_atr *req_data;
+	//const struct treq_sap_req_atr *req_data;
 
 	dbg(" Function entry");
 	if (!o || !ur)
@@ -741,7 +741,7 @@ static	TReturn s_get_atr(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_ENOSYS;
 	}
 
-	req_data = tcore_user_request_ref_data(ur, NULL);
+	//req_data = tcore_user_request_ref_data(ur, NULL);
 
 	cmd_str = g_strdup_printf("AT+ XBATR");
 
@@ -761,7 +761,7 @@ static	TReturn s_get_atr(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static	TReturn s_transfer_apdu(CoreObject *o, UserRequest *ur)
+static	TReturn imc_transfer_apdu(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
@@ -798,13 +798,13 @@ static	TReturn s_transfer_apdu(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
-static	TReturn s_get_cardreader_status(CoreObject *o, UserRequest *ur)
+static	TReturn imc_get_cardreader_status(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *hal;
 	TcoreATRequest *req;
 	TcorePending *pending = NULL;
 	char *cmd_str = NULL;
-	const struct treq_sap_req_cardreaderstatus *req_data;
+	//const struct treq_sap_req_cardreaderstatus *req_data;
 
 	dbg(" Function entry");
 	if (!o || !ur)
@@ -815,7 +815,7 @@ static	TReturn s_get_cardreader_status(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_ENOSYS;
 	}
 
-	req_data = tcore_user_request_ref_data(ur, NULL);
+	//req_data = tcore_user_request_ref_data(ur, NULL);
 
 	cmd_str = g_strdup_printf("AT+ XBCRDSTAT");
 
@@ -837,31 +837,32 @@ static	TReturn s_get_cardreader_status(CoreObject *o, UserRequest *ur)
 
 static struct tcore_sap_operations sap_ops =
 {
-	.connect = s_connect,
-	.disconnect = s_disconnect,
-	.req_status = s_req_status,
-	.set_transport_protocol = s_set_transport_protocol,
-	.set_power = s_set_power,
-	.get_atr = s_get_atr,
-	.transfer_apdu = s_transfer_apdu,
-	.get_cardreader_status = s_get_cardreader_status,
+	.connect = imc_connect,
+	.disconnect = imc_disconnect,
+	.req_status = imc_req_status,
+	.set_transport_protocol = imc_set_transport_protocol,
+	.set_power = imc_set_power,
+	.get_atr = imc_get_atr,
+	.transfer_apdu = imc_transfer_apdu,
+	.get_cardreader_status = imc_get_cardreader_status,
 };
 
 
-gboolean s_sap_init(TcorePlugin *cp, CoreObject *co_sap)
+gboolean imc_sap_init(TcorePlugin *cp, CoreObject *co_sap)
 {
 	dbg("Entry");
 
-	tcore_sap_override_ops(co_sap, &sap_ops);
+	/* Set operations */
+	tcore_sap_set_ops(co_sap, &sap_ops);
 
-	tcore_object_override_callback(co_sap,"+XBCSTAT", on_event_sap_status, NULL);
+	tcore_object_add_callback(co_sap,"+XBCSTAT", on_event_sap_status, NULL);
 
 	dbg("Exit");
 
 	return TRUE;
 }
 
-void s_sap_exit(TcorePlugin *cp, CoreObject *co_sap)
+void imc_sap_exit(TcorePlugin *cp, CoreObject *co_sap)
 {
 	dbg("Exit");
 }

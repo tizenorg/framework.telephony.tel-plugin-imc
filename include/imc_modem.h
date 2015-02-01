@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Arun Shukla <arun.shukla@samsung.com>
+ * Contact: Hayoon Ko <hayoon.ko@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef __S_GPS_H__
-#define __S_GPS_H__
+#ifndef __IMC_MODEM_H__
+#define __IMC_MODEM_H__
 
-gboolean s_gps_init(TcorePlugin *cp, CoreObject *co_gps);
-void s_gps_exit(TcorePlugin *cp, CoreObject *co_gps);
+gboolean imc_modem_init(TcorePlugin *cp, CoreObject *co_modem);
+void imc_modem_exit(TcorePlugin *cp, CoreObject *co_modem);
 
-#endif
+gboolean modem_power_on(TcorePlugin *plugin);
+void modem_register_nvm(CoreObject *co_modem);
+
+#endif	// __IMC_MODEM_H__

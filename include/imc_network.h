@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Arun Shukla <arun.shukla@samsung.com>
+ * Contact: Harish Bishnoi <hbishnoi@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef __S_PS_H__
-#define __S_PS_H__
+#ifndef __IMC_NETWORK_H__
+#define __IMC_NETWORK_H__
 
-gboolean s_ps_init(TcorePlugin *cp, CoreObject *co_ps);
-void s_ps_exit(TcorePlugin *cp, CoreObject *co_ps);
+gboolean imc_network_init(TcorePlugin *cp, CoreObject *co_network);
+void imc_network_exit(TcorePlugin *cp, CoreObject *co_network);
 
-#endif /*__S_PS_H__*/
+#endif	// __IMC_NETWORK_H__

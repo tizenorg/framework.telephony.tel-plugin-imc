@@ -26,7 +26,7 @@
 #include <log.h>
 
 
-#include "s_common.h"
+#include "imc_common.h"
 
 #undef  MAX
 #define MAX(a, b)  (((a) > (b)) ? (a) : (b))
@@ -102,7 +102,7 @@ unsigned char util_hexCharToInt(char c)
 char *util_hex_to_string(const char *src, unsigned int src_len)
 {
 	char *dest;
-	int i;
+	unsigned int i;
 
 	if (src == NULL)
 		return NULL;

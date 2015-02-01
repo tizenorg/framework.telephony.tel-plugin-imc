@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <glib.h>
+#include <string.h>
 
 #include <sys/stat.h>
 #include <tcore.h>
@@ -42,7 +43,7 @@
 #define NVM_DATA_LEN_POS			80
 
 /* Image Path information */
-#define MODEM_IMAGE_PATH				"/boot/modem.bin"
+#define MODEM_IMAGE_PATH				"/opt/modem/modem.bin"
 #define NVM_DIR_PATH 					"/csa/nv"
 #define NV_FILE_PATH NVM_DIR_PATH 		"/nvdata.bin"
 
@@ -231,12 +232,13 @@ gboolean nvm_create_nvm_data()
 			/* Close 'modem_fd' */
 			close(modem_fd);
 			return ret_val;
-		} else if (open(NV_FILE_PATH, O_EXCL) > 0) {
+		} else if ((nv_fd = open(NV_FILE_PATH, O_EXCL)) >= 0) {
 			/* NV data file already exists */
 			dbg("File exists: [%s]", NV_FILE_PATH);
 
 			/* Close 'modem_fd' */
 			close(modem_fd);
+			close(nv_fd);
 			return TRUE;
 		} else {
 			dbg("File does't exsits... need to create!!!");

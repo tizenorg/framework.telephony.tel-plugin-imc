@@ -37,8 +37,8 @@
 #include <at.h>
 #include <mux.h>
 
-#include "s_common.h"
-#include "s_modem.h"
+#include "imc_common.h"
+#include "imc_modem.h"
 #include "nvm/nvm.h"
 
 
@@ -165,6 +165,10 @@ void prepare_and_send_pending_request(CoreObject *co, const char *at_cmd, const 
 	tcore_pending_set_response_callback(pending, callback, NULL);
 	tcore_pending_set_send_callback(pending, on_confirmation_modem_message_send, NULL);
 	ret = tcore_hal_send_request(hal, pending);
+
+	if (ret != TCORE_RETURN_SUCCESS)
+		err("Failed to send AT request - ret: [0x%x]", ret);
+
 }
 
 static void on_response_power_off(TcorePending *p, int data_len, const void *data, void *user_data)
@@ -185,34 +189,35 @@ static void on_response_set_flight_mode(TcorePending *p, int data_len, const voi
 	CoreObject *o = NULL;
 	UserRequest *ur = NULL;
 	const TcoreATResponse *ATresp = data;
-	GSList *tokens = NULL;
-	const char *line = NULL;
 	struct tresp_modem_set_flightmode res = {0};
 	int response = 0;
 	struct tnoti_modem_flight_mode modem_flight_mode = {0};
-	const struct treq_modem_set_flightmode *req_data = NULL;
 
 	o = tcore_pending_ref_core_object(p);
+	ur = tcore_pending_ref_user_request(p);
 
 	if (ATresp->success > 0) {
 		dbg("RESPONSE OK - flight mode operation finished");
 		res.result = TCORE_RETURN_SUCCESS;
 	} else {
+		GSList *tokens = NULL;
+		const char *line = NULL;
 		dbg("RESPONSE NOK");
+
 		line = (const char *) ATresp->final_response;
 		tokens = tcore_at_tok_new(line);
 
 		if (g_slist_length(tokens) < 1) {
 			dbg("err cause not specified or string corrupted");
-			res.result = TCORE_RETURN_3GPP_ERROR;
 		} else {
 			response = atoi(g_slist_nth_data(tokens, 0));
+			err("error response: %d", response);
 			/* TODO: CMEE error mapping is required. */
-			res.result = TCORE_RETURN_3GPP_ERROR;
 		}
+		tcore_at_tok_free(tokens);
+		res.result = TCORE_RETURN_3GPP_ERROR;
 	}
 
-	ur = tcore_pending_ref_user_request(p);
 	if (NULL == ur) {
 		dbg("No user request. Internal request created during boot-up sequence");
 
@@ -224,20 +229,24 @@ static void on_response_set_flight_mode(TcorePending *p, int data_len, const voi
 										   sizeof(struct tnoti_modem_flight_mode), &modem_flight_mode);
 		}
 	} else {
+		const struct treq_modem_set_flightmode *req_data = NULL;
+
 		dbg("Sending response for Flight mode operation");
 
 		req_data = tcore_user_request_ref_data(ur, NULL);
 
 		if (TCORE_RETURN_SUCCESS == res.result) {
-			if (TRUE == req_data->enable)
-				res.result = 1;
-			else
-				res.result = 2;
-		} else {
-			res.result = 3;
+			if (TRUE == req_data->enable){
+				tcore_modem_set_flight_mode_state(o, TRUE);
+			} else {
+				tcore_modem_set_flight_mode_state(o, FALSE);
+			}
 		}
-
 		tcore_user_request_send_response(ur, TRESP_MODEM_SET_FLIGHTMODE, sizeof(struct tresp_modem_set_flightmode), &res);
+
+		modem_flight_mode.enable = tcore_modem_get_flight_mode_state(o);
+		tcore_server_send_notification(tcore_plugin_ref_server(tcore_object_ref_plugin(o)), o, TNOTI_MODEM_FLIGHT_MODE,
+										   sizeof(struct tnoti_modem_flight_mode), &modem_flight_mode);
 
 		if (req_data->enable == 0) {
 			dbg("Flight mode is disabled, trigger COPS to register on network");
@@ -245,8 +254,6 @@ static void on_response_set_flight_mode(TcorePending *p, int data_len, const voi
 			prepare_and_send_pending_request(o, "AT+COPS=0", NULL, TCORE_AT_NO_RESULT, NULL);
 		}
 	}
-
-	tcore_at_tok_free(tokens);
 }
 
 static void on_response_imei(TcorePending *p, int data_len, const void *data, void *user_data)
@@ -297,6 +304,7 @@ static void on_response_imei(TcorePending *p, int data_len, const void *data, vo
 			res.result = TCORE_RETURN_3GPP_ERROR;
 		} else {
 			response = atoi(g_slist_nth_data(tokens, 0));
+			err("error response: %d", response);
 			/* TODO: CMEE error mapping is required. */
 			res.result = TCORE_RETURN_3GPP_ERROR;
 		}
@@ -328,7 +336,6 @@ static void on_response_version(TcorePending *p, int data_len, const void *data,
 	char *caldate = NULL;
 	char *pcode = NULL;
 	char *id = NULL;
-
 	int response = 0;
 
 	if (resp->success > 0) {
@@ -399,6 +406,7 @@ static void on_response_version(TcorePending *p, int data_len, const void *data,
 			res.result = TCORE_RETURN_3GPP_ERROR;
 		} else {
 			response = atoi(g_slist_nth_data(tokens, 0));
+			err("error response: %d", response);
 			/* TODO: CMEE error mapping is required. */
 			res.result = TCORE_RETURN_3GPP_ERROR;
 		}
@@ -624,19 +632,38 @@ static TReturn set_flight_mode(CoreObject *o, UserRequest *ur)
 	return tcore_hal_send_request(hal, pending);
 }
 
+static TReturn get_flight_mode(CoreObject *co_modem, UserRequest *ur)
+{
+	struct tresp_modem_get_flightmode resp_data;
+	TReturn ret;
+
+	memset(&resp_data, 0x0, sizeof(struct tresp_modem_get_flightmode));
+
+	resp_data.enable = tcore_modem_get_flight_mode_state(co_modem);
+	resp_data.result = TCORE_RETURN_SUCCESS;
+	dbg("Get Flight mode: Flight mdoe: [%s]", (resp_data.enable ? "ON" : "OFF"));
+
+	ret = tcore_user_request_send_response(ur,
+		TRESP_MODEM_GET_FLIGHTMODE,
+		sizeof(struct tresp_modem_get_flightmode), &resp_data);
+	dbg("ret: [0x%x]", ret);
+
+	return ret;
+}
 
 static struct tcore_modem_operations modem_ops = {
 	.power_on = NULL,
 	.power_off = power_off,
 	.power_reset = NULL,
 	.set_flight_mode = set_flight_mode,
+	.get_flight_mode = get_flight_mode,
 	.get_imei = get_imei,
 	.get_version = get_version,
 	.get_sn = NULL,
 	.dun_pin_ctrl = NULL,
 };
 
-gboolean s_modem_init(TcorePlugin *cp, CoreObject *co_modem)
+gboolean imc_modem_init(TcorePlugin *cp, CoreObject *co_modem)
 {
 	TelMiscVersionInformation *vi_property;
 	TelMiscSNInformation *imei_property;
@@ -644,7 +671,8 @@ gboolean s_modem_init(TcorePlugin *cp, CoreObject *co_modem)
 
 	dbg("Enter");
 
-	tcore_modem_override_ops(co_modem, &modem_ops);
+	/* Set operations */
+	tcore_modem_set_ops(co_modem, &modem_ops);
 
 	vi_property = g_try_new0(TelMiscVersionInformation, 1);
 	tcore_plugin_link_property(cp, "VERSION", vi_property);
@@ -664,7 +692,7 @@ gboolean s_modem_init(TcorePlugin *cp, CoreObject *co_modem)
 	return TRUE;
 }
 
-void s_modem_exit(TcorePlugin *cp, CoreObject *co_modem)
+void imc_modem_exit(TcorePlugin *cp, CoreObject *co_modem)
 {
 	TelMiscVersionInformation *vi_property;
 	TelMiscSNInformation *imei_property;
@@ -1028,6 +1056,7 @@ void modem_register_nvm(CoreObject *co_modem)
 		dbg("IUFP_REGISTER (Enable) -Successfully sent AT-Command");
 
 		/* Add RFS hook */
+		/* Todo unblock this api */
 		tcore_at_add_hook(tcore_object_get_hal(co_modem), modem_rfs_hook);
 	}
 

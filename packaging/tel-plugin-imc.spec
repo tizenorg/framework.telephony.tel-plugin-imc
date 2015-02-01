@@ -1,6 +1,6 @@
 Name:		tel-plugin-imc
 Summary:	imc plugin for telephony
-Version:	0.1.42
+Version:	0.1.67
 Release:	1
 Group:		Development/Libraries
 License:	Apache-2.0
@@ -12,6 +12,7 @@ BuildRequires:	pkgconfig(glib-2.0)
 BuildRequires:	pkgconfig(dlog)
 BuildRequires:	pkgconfig(tcore)
 BuildRequires:	pkgconfig(db-util)
+BuildRequires:	pkgconfig(vconf)
 BuildRequires:	pkgconfig(libxml-2.0)
 
 %description
