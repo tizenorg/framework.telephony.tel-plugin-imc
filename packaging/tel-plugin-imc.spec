@@ -1,19 +1,30 @@
-#sbs-git:slp/pkgs/t/tel-plugin-imc
-Name:       tel-plugin-imc
-Summary:    imc plugin for telephony
-ExclusiveArch:  %{arm}
-Version:    0.1.14
-Release:    1
-Group:      System/Libraries
-License:    Apache
-Source0:    tel-plugin-imc-%{version}.tar.gz
-Requires(post): /sbin/ldconfig
+%define major 0
+%define minor 1
+%define patchlevel 72
+
+
+Name:             tel-plugin-imc
+Version:          %{major}.%{minor}.%{patchlevel}
+Release:          1
+License:          Apache-2.0
+Summary:          imc-plugin for Telephony
+Group:            Development/Libraries
+Source0:          tel-plugin-imc-%{version}.tar.gz
+
+%if "%{?tizen_profile_name}" == "mobile" && "%{_repository}" == "target"
+%else
+ExcludeArch: %{arm} %ix86 x86_64
+%endif
+
+BuildRequires:    cmake
+BuildRequires:    pkgconfig(glib-2.0)
+BuildRequires:    pkgconfig(dlog)
+BuildRequires:    pkgconfig(tcore)
+BuildRequires:    pkgconfig(db-util)
+BuildRequires:    pkgconfig(vconf)
+BuildRequires:    pkgconfig(libxml-2.0)
+Requires(post):   /sbin/ldconfig
 Requires(postun): /sbin/ldconfig
-BuildRequires:  cmake
-BuildRequires:  pkgconfig(glib-2.0)
-BuildRequires:  pkgconfig(dlog)
-BuildRequires:  pkgconfig(tcore)
-BuildRequires:  pkgconfig(db-util)
 
 %description
 IMC plugin for telephony
@@ -22,8 +33,8 @@ IMC plugin for telephony
 %setup -q
 
 %build
-cmake . -DCMAKE_INSTALL_PREFIX=%{_prefix}
-make %{?jobs:-j%jobs}
+%cmake .
+make %{?_smp_mflags}
 
 %post
 /sbin/ldconfig
@@ -48,12 +59,14 @@ fi
 %postun -p /sbin/ldconfig
 
 %install
-rm -rf %{buildroot}
 %make_install
+mkdir -p %{buildroot}/usr/share/license
+cp LICENSE %{buildroot}/usr/share/license/%{name}
 
 %files
-#%manifest tel-plugin-imc.manifest
+
 %defattr(-,root,root,-)
-#%doc COPYING
-%{_libdir}/telephony/plugins/*
+
+%{_libdir}/telephony/plugins/modems/*
 /tmp/mcc_mnc_oper_list.sql
+/usr/share/license/%{name}

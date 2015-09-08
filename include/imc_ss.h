@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Madhavi Akella <madhavi.a@samsung.com>
+ * Contact: Sharanayya Mathapati <sharan.m@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef S_SMS_H_
-#define S_SMS_H_
+#ifndef __IMC_SS_H__
+#define __IMC_SS_H__
 
-gboolean s_sms_init(TcorePlugin *p, TcoreHal *h);
-void s_sms_exit(TcorePlugin *p);
+gboolean imc_ss_init(TcorePlugin *cp, CoreObject *co_ss);
+void imc_ss_exit(TcorePlugin *cp, CoreObject *co_ss);
 
-#endif // S_SMS_H_
+#endif	// __IMC_SS_H__

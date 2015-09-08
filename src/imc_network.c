@@ -28,6 +28,7 @@
 #include <hal.h>
 #include <core_object.h>
 #include <plugin.h>
+#include <user_request.h>
 #include <queue.h>
 #include <co_network.h>
 #include <co_ps.h>
@@ -36,8 +37,8 @@
 #include <util.h>
 #include <at.h>
 
-#include "s_common.h"
-#include "s_network.h"
+#include "imc_common.h"
+#include "imc_network.h"
 
 #define AT_CREG_STAT_NOT_REG    0 /* not registered, MT is not currently searching a new operator to register to */
 #define AT_CREG_STAT_REG_HOME   1 /* registered, home network */
@@ -83,6 +84,16 @@
 #define MAX_NETWORKS_PREF_PLMN_SUPPORT 150
 #define MAX_NETWORKS_MANUAL_SEARCH_SUPPORT 20
 
+typedef enum {
+	IMC_NETWORK_SEARCH_STATE_NO_SEARCH,
+	IMC_NETWORK_SEARCH_STATE_IN_PROGRESS,
+	IMC_NETWORK_SEARCH_STATE_CANCELLED
+} ImcNetworkSearchState;
+
+typedef struct {
+	ImcNetworkSearchState search_state;
+} CustomData;
+
 static unsigned int lookup_tbl_net_status[] = {
 	[AT_CREG_STAT_NOT_REG] = NETWORK_SERVICE_DOMAIN_STATUS_NO,
 	[AT_CREG_STAT_REG_HOME] = NETWORK_SERVICE_DOMAIN_STATUS_FULL,
@@ -118,20 +129,21 @@ static void on_confirmation_network_message_send(TcorePending *p, gboolean resul
 	}
 }
 
-static void nwk_prepare_and_send_pending_request(TcorePlugin *plugin, char *co_name, const char *at_cmd, const char *prefix, enum tcore_at_command_type at_cmd_type, UserRequest *ur, TcorePendingResponseCallback callback)
+static void nwk_prepare_and_send_pending_request(CoreObject *co, const char *at_cmd, const char *prefix, enum tcore_at_command_type at_cmd_type, UserRequest *ur, TcorePendingResponseCallback callback)
 {
 	TcoreATRequest *req = NULL;
 	TcoreHal *hal;
-	CoreObject *o = NULL;
 	TcorePending *pending = NULL;
 	TReturn ret;
 
-	o = tcore_plugin_ref_core_object(plugin, co_name);
-	hal = tcore_object_get_hal(o);
+	hal = tcore_object_get_hal(co);
 
-	pending = tcore_pending_new(o, 0);
+	pending = tcore_pending_new(co, 0);
 	req = tcore_at_request_new(at_cmd, prefix, at_cmd_type);
-
+	if (req == NULL) {
+		tcore_pending_free(pending);
+		return;
+	}
 	dbg("cmd : %s, prefix(if any) :%s, cmd_len : %d", req->cmd, req->prefix, strlen(req->cmd));
 
 	tcore_pending_set_request_data(pending, 0, req);
@@ -140,6 +152,12 @@ static void nwk_prepare_and_send_pending_request(TcorePlugin *plugin, char *co_n
 	tcore_pending_set_send_callback(pending, on_confirmation_network_message_send, NULL);
 
 	ret = tcore_hal_send_request(hal, pending);
+
+	if (ret != TCORE_RETURN_SUCCESS) {
+		err("Failed to send AT request - ret: [0x%x]", ret);
+		tcore_pending_free(pending);
+		tcore_at_request_free(req);
+	}
 	return;
 }
 
@@ -177,13 +195,18 @@ static void _insert_mcc_mnc_oper_list(TcorePlugin *p, CoreObject *o)
 		row = value;
 
 		noi = calloc(sizeof(struct tcore_network_operator_info), 1);
-
+		if (!noi) {
+			dbg("Memory allocation failed");
+			return;
+		}
 		snprintf(noi->mcc, 4, "%s", (char *) g_hash_table_lookup(row, "1"));
 		snprintf(noi->mnc, 4, "%s", (char *) g_hash_table_lookup(row, "2"));
 		snprintf(noi->name, 41, "%s", (char *) g_hash_table_lookup(row, "3"));
 		snprintf(noi->country, 4, "%s", (char *) g_hash_table_lookup(row, "0"));
 
 		tcore_network_operator_info_add(o, noi);
+		g_free(noi);
+		noi = NULL;
 
 		count++;
 	}
@@ -244,25 +267,41 @@ static enum telephony_network_service_type _get_service_type(enum telephony_netw
 
 static void _ps_set(TcorePlugin *p, int status)
 {
-	GSList *co_list = NULL;
+	CoreObject *co_ps;
 
-	co_list = tcore_plugin_get_core_objects_bytype(p, CORE_OBJECT_TYPE_PS);
-	do {
-		CoreObject *o = NULL;
-		o = (CoreObject *) co_list->data;
-		if (!o)
-			break;
+	co_ps = tcore_plugin_ref_core_object(p, CORE_OBJECT_TYPE_PS);
+	if (co_ps == NULL) {
+		err("No PS Core Object on plugin");
+		return;
+	}
 
-		if (status == NETWORK_SERVICE_DOMAIN_STATUS_FULL) {
-			tcore_ps_set_online(o, TRUE);
-		} else {
-			tcore_ps_set_online(o, FALSE);
-		}
-	} while ((co_list = g_slist_next(co_list)));
-
-	g_slist_free(co_list);
+	if (status == NETWORK_SERVICE_DOMAIN_STATUS_FULL)
+		tcore_ps_set_online(co_ps, TRUE);
+	else
+		tcore_ps_set_online(co_ps, FALSE);
 }
 
+static void on_timeout_search_network(TcorePending *p, void *user_data)
+{
+	UserRequest *ur;
+	struct tresp_network_search resp;
+	CustomData *custom_data;
+
+	dbg("TIMEOUT !!!!! pending=%p", p);
+
+	memset(&resp, 0, sizeof(struct tresp_network_search));
+
+	resp.result = TCORE_RETURN_FAILURE;
+	resp.list_count = 0;
+
+	custom_data = tcore_object_ref_user_data(tcore_pending_ref_core_object(p));
+	custom_data->search_state = IMC_NETWORK_SEARCH_STATE_NO_SEARCH;
+
+	ur = tcore_pending_ref_user_request(p);
+	if (ur) {
+		tcore_user_request_send_response(ur, TRESP_NETWORK_SEARCH, sizeof(struct tresp_network_search), &resp);
+	}
+}
 
 static void on_response_set_plmn_selection_mode(TcorePending *p, int data_len, const void *data, void *user_data)
 {
@@ -315,12 +354,12 @@ static void on_response_get_plmn_selection_mode(TcorePending *p, int data_len, c
 
 			switch (mode) {
 			case AT_COPS_MODE_AUTOMATIC:
-				resp.mode = NETWORK_SELECT_MODE_GLOBAL_AUTOMATIC;
+				resp.mode = NETWORK_SELECT_MODE_AUTOMATIC;
 				break;
 
 			case AT_COPS_MODE_MANUAL:
 			case AT_COPS_MODE_MANUAL_AUTOMATIC:
-				resp.mode = NETWORK_SELECT_MODE_GSM_MANUAL;
+				resp.mode = NETWORK_SELECT_MODE_MANUAL;
 				break;
 
 			case AT_COPS_MODE_DEREGISTER:
@@ -358,15 +397,31 @@ static void on_response_search_network(TcorePending *p, int data_len, const void
 	GSList *network_token = NULL;
 	int AcT = 0;
 	char *temp_plmn_info = NULL;
+	char *alpha_name = NULL;
 	char *pResp = NULL;
 	int num_network_avail = 0;
+	CustomData *custom_data;
 
 	memset(&resp, 0, sizeof(struct tresp_network_search));
 	resp.result = TCORE_RETURN_FAILURE;
 	resp.list_count = 0;
 
+	custom_data = tcore_object_ref_user_data(tcore_pending_ref_core_object(p));
+	if (!custom_data) {
+		err("Network Search Custom Data is Null");
+		return;
+	}
+
 	if (atResp->success > 0) {
 		dbg("RESPONSE OK");
+
+		/* If Request is Cancelled then return back SUCCESS/SEARCH_CANCELLED */
+		if (custom_data->search_state
+				== IMC_NETWORK_SEARCH_STATE_CANCELLED) {
+			dbg("Network Search has been Cancelled!!!");
+			goto OUT;
+		}
+
 		if (atResp->lines) {
 			line = (char *) atResp->lines->data;
 			tokens = tcore_at_tok_new(line);
@@ -379,15 +434,13 @@ static void on_response_search_network(TcorePending *p, int data_len, const void
 		}
 
 		resp.result = TCORE_RETURN_SUCCESS;
+
 		/*
-		 *	+COPS: [list of supported (<stat>,long alphanumeric <oper>,short alphanumeric <oper>,numeric <oper>[,<AcT>])s]
-		 *	       [,,(list of supported <mode>s),(list of supported <format>s)]
-		*/
-
-		/* (2,"IND airtel","airtel","40445",2,),(1,"IND airtel","airtel","40445",0,),(3,"TATA DOCOMO","TATA DO","405034",2,) */
-
+		 * +COPS: [list of supported (<stat>,long alphanumeric <oper>,
+		 *	short alphanumeric <oper>,numeric <oper>[,<AcT>])s]
+		 *	[,,(list of supported <mode>s),(list of supported <format>s)]
+		 */
 		for (i = 0; ((i < num_network_avail) && (i < MAX_NETWORKS_MANUAL_SEARCH_SUPPORT)); i++) {
-			/* (2,"IND airtel","airtel","40445",2,) */
 			network_token = tcore_at_tok_new(g_slist_nth_data(tokens, i));
 
 			pResp = (tcore_at_tok_nth(network_token, 0));
@@ -396,33 +449,32 @@ static void on_response_search_network(TcorePending *p, int data_len, const void
 				resp.list[i].status = (enum telephony_network_plmn_status) atoi(pResp);
 			}
 
-			if ((pResp = tcore_at_tok_nth(network_token, 1))) {     /* Long Aplha name */
-				dbg("Long Aplha name : %s", pResp);
+			if ((pResp = tcore_at_tok_nth(network_token, 1))) {	/* Long Alpha name */
+				dbg("Long Alpha name : %s", pResp);
 
-				if (strlen(pResp) > 0)
+				if (strlen(pResp) > 0) {
 					/* Strip off starting quote & ending quote */
 					strncpy(resp.list[i].name, pResp + 1, strlen(pResp) - 2);
-			} else if ((pResp = tcore_at_tok_nth(network_token, 2))) {
-				dbg("Short Aplha name : %s", pResp);
-				/* Short Aplha name */
-				/* Strip off starting quote & ending quote */
-				if (strlen(pResp) > 0)
-					strncpy(resp.list[i].name, pResp + 1, strlen(pResp) - 2);
+				} else if ((pResp = tcore_at_tok_nth(network_token, 2))) {
+					dbg("Short Aplha name : %s", pResp);
+					/* Short Aplha name */
+					/* Strip off starting quote & ending quote */
+					if (strlen(pResp) > 0)
+						strncpy(resp.list[i].name, pResp + 1, strlen(pResp) - 2);
+				}
 			}
 
 			/* PLMN ID */
 			pResp = tcore_at_tok_nth(network_token, 3);
 			if (pResp != NULL) {
 				dbg("PLMN ID : %s", pResp);
-				temp_plmn_info = util_removeQuotes(pResp);
+				temp_plmn_info = tcore_at_tok_extract((const char *)pResp);
+				strncpy(resp.list[i].plmn, temp_plmn_info, 6);
+				resp.list[i].plmn[6] = '\0';
 			}
 
-			memcpy(resp.list[i].plmn, temp_plmn_info, 6);
-			if (resp.list[i].plmn[5] == '#')
-				resp.list[i].plmn[5] = '\0';
-
 			/* Parse Access Technology */
-			if ((pResp = tcore_at_tok_nth(tokens, 4))) {
+			if ((pResp = tcore_at_tok_nth(network_token, 4))) {
 				if (strlen(pResp) > 0) {
 					AcT = atoi(pResp);
 
@@ -437,6 +489,8 @@ static void on_response_search_network(TcorePending *p, int data_len, const void
 			resp.list_count++;
 
 			tcore_at_tok_free(network_token);
+			g_free(alpha_name);
+			g_free(temp_plmn_info);
 		}
 	} else {
 		dbg("RESPONSE NOK");
@@ -444,18 +498,17 @@ static void on_response_search_network(TcorePending *p, int data_len, const void
 	}
 
 OUT:
+	custom_data->search_state = IMC_NETWORK_SEARCH_STATE_NO_SEARCH;
+
 	ur = tcore_pending_ref_user_request(p);
 	if (ur) {
-		tcore_user_request_send_response(ur, TRESP_NETWORK_SEARCH, sizeof(struct tresp_network_search), &resp);
+		tcore_user_request_send_response(ur,
+			TRESP_NETWORK_SEARCH,
+			sizeof(struct tresp_network_search), &resp);
 	}
 
-	if (tokens)
-		tcore_at_tok_free(tokens);
-
-	if (temp_plmn_info)
-		free(temp_plmn_info);
-
-	return;
+	/* Free tokens */
+	tcore_at_tok_free(tokens);
 }
 
 static void on_response_set_umts_band(TcorePending *p, int data_len, const void *data, void *user_data)
@@ -734,6 +787,10 @@ static void on_response_get_xrat(TcorePending *p, int data_len, const void *data
 				dup_ur = tcore_user_request_ref(ur); /* duplicate user request for AT+XUBANDSEL */
 				cmd_str = g_strdup_printf("AT+XUBANDSEL?");
 				atreq = tcore_at_request_new(cmd_str, "+XUBANDSEL", TCORE_AT_SINGLELINE);
+				if (atreq == NULL) {
+					g_free(cmd_str);
+					goto OUT;
+				}
 				pending = tcore_pending_new(o, 0);
 				tcore_pending_set_request_data(pending, 0, atreq);
 				tcore_pending_set_response_callback(pending, on_response_get_umts_band, NULL);
@@ -741,7 +798,7 @@ static void on_response_get_xrat(TcorePending *p, int data_len, const void *data
 				tcore_pending_set_send_callback(pending, on_confirmation_network_message_send, NULL);
 				tcore_hal_send_request(h, pending);
 				g_free(cmd_str);
-			} else if ((cp_xrat == AT_XRAT_UMTS)) {
+			} else if ((cp_xrat == AT_XRAT_GSM)) {
 				/* Get GSM Band Information */
 				dup_ur = tcore_user_request_ref(ur); /* duplicate user request for AT+XBANDSEL */
 				cmd_str = g_strdup_printf("AT+XBANDSEL?");
@@ -837,6 +894,7 @@ static void on_response_get_nitz_name(TcorePending *p, int data_len, const void 
 	int count = 0;
 	int net_name_type = 0;
 	char *pResp = NULL;
+	char *net_name = NULL;
 
 	dbg("Entry on_response_get_nitz_name (+XCOPS)");
 	o = tcore_pending_ref_core_object(p);
@@ -850,6 +908,8 @@ static void on_response_get_nitz_name(TcorePending *p, int data_len, const void 
 				goto OUT;
 			}
 
+			memset(&noti, 0, sizeof(struct tnoti_network_identity));
+
 			for (count = 0; count < nol; count++) {
 				// parse each line
 				line = g_slist_nth_data(atResp->lines, count);
@@ -861,32 +921,51 @@ static void on_response_get_nitz_name(TcorePending *p, int data_len, const void 
 					dbg("Net name type  : %d", net_name_type);
 
 					switch (net_name_type) {
-					case 0:     /* plmn_id (mcc, mnc) */
+					case 0: /* plmn_id (mcc, mnc) */
 						if ((pResp = tcore_at_tok_nth(tokens, 1))) {
-							strncpy(noti.plmn, pResp + 1, strlen(pResp) - 2); /* skip quotes (") while copying */
+							if (strlen(pResp) > 0) {
+								net_name = tcore_at_tok_extract((const char *)pResp);
+								strncpy(noti.plmn, net_name, 6);
+								noti.plmn[6] = '\0';
+							}
 						}
 						break;
 
-					case 5:      /* Short Nitz name*/
+					case 5: /* Short NITZ name*/
+					case 3: /* Short Network Name (CPHS) */
 						if ((pResp = tcore_at_tok_nth(tokens, 1))) {
-							strncpy(noti.short_name, pResp + 1, strlen(pResp) - 2); /* skip quotes (") while copying */
+							if (strlen(pResp) > 0) {
+								net_name = tcore_at_tok_extract((const char *)pResp);
+								strncpy(noti.short_name, net_name, 16);
+								noti.short_name[16] = '\0';
+							}
 						}
 						break;
 
-					case 6:     /* Full Nitz name */
+					case 6: /* Full NITZ name */
+					case 4: /* Long Network Name (CPHS) */
 						if ((pResp = tcore_at_tok_nth(tokens, 1))) {
-							strncpy(noti.full_name, pResp + 1, strlen(pResp) - 2); /* skip quotes (") while copying */
+							if (strlen(pResp) > 0) {
+								net_name = tcore_at_tok_extract((const char *)pResp);
+								strncpy(noti.full_name, net_name, 32);
+								noti.full_name[32] = '\0';
+							}
 						}
 						break;
 
 					default:
 						break;
 					}
+
+					g_free(net_name);
+					net_name = NULL;
 				}
-				if (tokens != NULL)
-					tcore_at_tok_free(tokens);
+
+				tcore_at_tok_free(tokens);
 			}
 
+			dbg("plmn <%s> short NITZ name<%s> full NITZ name<%s>",
+				noti.plmn, noti.short_name, noti.full_name);
 			tcore_server_send_notification(tcore_plugin_ref_server(tcore_object_ref_plugin(o)), o, TNOTI_NETWORK_IDENTITY,
 										   sizeof(struct tnoti_network_identity), &noti);
 		}
@@ -905,7 +984,6 @@ static void on_response_get_preferred_plmn(TcorePending *p, int data_len, const 
 	char *line = NULL;
 	const TcoreATResponse *atResp = data;
 	GSList *tokens = NULL;
-	char temp_plmn_info[17] = {0};
 	char *pResp = NULL;
 	int plmn_format = 0;
 
@@ -913,7 +991,7 @@ static void on_response_get_preferred_plmn(TcorePending *p, int data_len, const 
 	int total_lines = 0;
 	int GSM_AcT2 = 0, GSM_Compact_AcT2 = 0, UTRAN_AcT2 = 0;
 
-	dbg("Entry on_response_get_preferred_plmn");
+	dbg("Entry");
 
 	if (atResp->success > 0) {
 		dbg("RESPONSE OK");
@@ -930,10 +1008,9 @@ static void on_response_get_preferred_plmn(TcorePending *p, int data_len, const 
 				total_lines = MAX_NETWORKS_PREF_PLMN_SUPPORT;
 
 /*
-+COPL: <index1>,<format>,<oper1>[,<GSM_AcT1>,<GSM_Compact_AcT1>,<UTRAN_AcT1>,<E-UTRAN_AcT1>] [<CR><LF>
++CPOL: <index1>,<format>,<oper1>[,<GSM_AcT1>,<GSM_Compact_AcT1>,<UTRAN_AcT1>,<E-UTRAN_AcT1>] [<CR><LF>
 +CPOL: <index2>,<format>,<oper2>[,<GSM_AcT2>,<GSM_Compact_AcT2>,<UTRAN_AcT2>,<E-UTRAN_AcT2>]
 */
-
 			resp.result = TCORE_RETURN_SUCCESS;
 
 			for (i = 0; i < total_lines; i++) {
@@ -959,21 +1036,18 @@ static void on_response_get_preferred_plmn(TcorePending *p, int data_len, const 
 					dbg("plmn ID : %s", pResp);
 
 					if (strlen(pResp) > 0) {
-						strncpy(temp_plmn_info, pResp + 1, (strlen(pResp)) - 2);
+						char *oper;
+
+						oper = tcore_at_tok_extract((const char *)pResp);
+						dbg("operator <%s>", oper);
 
 						// Get only PLMN ID
 						if (plmn_format == 2) {
-							// cp_plmn = util_hexStringToBytes(temp_plmn_info);
-
-							if (strncmp((char *) temp_plmn_info, "000000", 6) == 0)
-								continue;
-
-							memcpy(resp.list[i].plmn, temp_plmn_info, 6);
-							if (resp.list[i].plmn[5] == '#')
-								resp.list[i].plmn[5] = '\0';
-
-							// free(cp_plmn);
+							strncpy(resp.list[i].plmn, oper, 6);
+							resp.list[i].plmn[6] = '\0';
 						}
+
+						g_free (oper);
 					}
 				}
 
@@ -1004,7 +1078,12 @@ static void on_response_get_preferred_plmn(TcorePending *p, int data_len, const 
 				tcore_at_tok_free(tokens);
 			}
 		}
+	} else {
+		dbg("RESPONSE NOT OK");
+		// TODO: CMEE error mapping is required.
+		resp.result = TCORE_RETURN_FAILURE;
 	}
+
 OUT:
 	ur = tcore_pending_ref_user_request(p);
 	if (ur) {
@@ -1019,9 +1098,9 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 	const TcoreATResponse *resp = data;
 	UserRequest *ur;
 	struct tresp_network_get_serving_network Tresp = {0};
-	char plmn[7] = {0};
 	char *long_plmn_name = NULL;
 	char *short_plmn_name = NULL;
+	char *plmn_id = NULL;
 	CoreObject *o;
 	GSList *tokens = NULL;
 	const char *line;
@@ -1073,7 +1152,7 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 				if ((pResp = tcore_at_tok_nth(tokens, 2))) {
 					dbg("long PLMN  : %s", pResp);
 					if (strlen(pResp) > 0) {
-						long_plmn_name = util_removeQuotes(pResp);
+						long_plmn_name = tcore_at_tok_extract((const char *)pResp);
 
 						// set network name into po
 						tcore_network_set_network_name(o, TCORE_NETWORK_NAME_TYPE_FULL, long_plmn_name);
@@ -1085,7 +1164,7 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 				if ((pResp = tcore_at_tok_nth(tokens, 2))) {
 					dbg("short PLMN  : %s", pResp);
 					if (strlen(pResp) > 0) {
-						short_plmn_name = util_removeQuotes(pResp);
+						short_plmn_name = tcore_at_tok_extract((const char *)pResp);
 
 						// set network name into po
 						tcore_network_set_network_name(o, TCORE_NETWORK_NAME_TYPE_SHORT, short_plmn_name);
@@ -1097,11 +1176,10 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 				if ((pResp = tcore_at_tok_nth(tokens, 2))) {
 					dbg("numeric : %s", pResp);
 					if (strlen(pResp) > 0) {
-						memset(plmn, 0, 7);
+						plmn_id = tcore_at_tok_extract((const char *)pResp);
 
-						/* Strip off starting quotes & ending quotes */
-						strncpy(plmn, pResp + 1, strlen(pResp) - 2);
-						tcore_network_set_plmn(o, plmn);
+						// set plmn id into po
+						tcore_network_set_plmn(o, plmn_id);
 					}
 				}
 				break;
@@ -1122,7 +1200,8 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 			tcore_at_tok_free(tokens);
 		}
 
-		memcpy(Tresp.plmn, plmn, 7);
+		if(plmn_id)
+			memcpy(Tresp.plmn, plmn_id, strlen(plmn_id));
 		tcore_network_get_access_technology(o, &(Tresp.act));
 		tcore_network_get_lac(o, &(Tresp.gsm.lac));
 
@@ -1135,12 +1214,13 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 			struct tnoti_network_change network_change;
 
 			memset(&network_change, 0, sizeof(struct tnoti_network_change));
-			memcpy(network_change.plmn, plmn, 7);
+			if(plmn_id)
+				memcpy(network_change.plmn, plmn_id, strlen(plmn_id));
 			tcore_network_get_access_technology(o, &(network_change.act));
 			tcore_network_get_lac(o, &(network_change.gsm.lac));
 
 			tcore_server_send_notification(tcore_plugin_ref_server(tcore_pending_ref_plugin(p)), tcore_pending_ref_core_object(p),
-										   TNOTI_NETWORK_CHANGE, sizeof(struct tnoti_network_change), &network_change);
+										TNOTI_NETWORK_CHANGE, sizeof(struct tnoti_network_change), &network_change);
 			dbg("dbg.. network_change.plmn  : %s", network_change.plmn);
 			dbg("dbg.. network_change.act  : %d", network_change.act);
 			dbg("dbg.. network_change.gsm.lac  : %d", network_change.gsm.lac);
@@ -1148,25 +1228,145 @@ static void on_response_get_serving_network(TcorePending *p, int data_len, const
 			if ((AT_COPS_MODE_DEREGISTER != network_mode) &&
 				(AT_COPS_MODE_SET_ONLY != network_mode)) {
 				/*Network identity noti*/
-				memset(&noti, 0x0, sizeof(struct tnoti_network_change));
+				memset(&noti, 0x0, sizeof(struct tnoti_network_identity));
 				if (long_plmn_name)
-					memcpy(noti.full_name, long_plmn_name, MIN(33, strlen(long_plmn_name)));
+					memcpy(noti.full_name, long_plmn_name, MIN(32, strlen(long_plmn_name)));
 				if (short_plmn_name)
-					memcpy(noti.short_name, short_plmn_name, MIN(17, strlen(long_plmn_name)));
-				memcpy(noti.plmn, plmn, 7);
+					memcpy(noti.short_name, short_plmn_name, MIN(16, strlen(short_plmn_name)));
+				if (plmn_id)
+					memcpy(noti.plmn, plmn_id, strlen(plmn_id)); // plmn_id length is necessarily <= 6
+
 				tcore_server_send_notification(tcore_plugin_ref_server(tcore_object_ref_plugin(o)),
-											   o, TNOTI_NETWORK_IDENTITY, sizeof(struct tnoti_network_identity), &noti);
+								o, TNOTI_NETWORK_IDENTITY, sizeof(struct tnoti_network_identity), &noti);
 				dbg("dbg.. noti.short_name  : %s", noti.short_name);
 				dbg("dbg.. noti.full_name  : %s", noti.full_name);
 				dbg("dbg.. noti.plmn  : %s", noti.plmn);
 			}
 		}
-		if (long_plmn_name)
-			free(long_plmn_name);
-		if (short_plmn_name)
-			free(short_plmn_name);
+
+		g_free(long_plmn_name);
+		g_free(short_plmn_name);
+		g_free(plmn_id);
 	}
 	return;
+}
+
+static void on_response_network_set_mode(TcorePending *p, int data_len, const void *data, void *user_data)
+{
+	UserRequest *ur = NULL;
+	struct tresp_network_set_mode resp = {0};
+	const TcoreATResponse *atResp = data;
+
+	dbg("ENTER on_response_network_set_mode");
+
+	if (atResp && atResp->success) {
+		dbg("RESPONSE OK");
+		resp.result = TCORE_RETURN_SUCCESS;
+	} else {
+		err("RESPONSE NOK");
+		resp.result = TCORE_RETURN_FAILURE;
+	}
+
+	ur = tcore_pending_ref_user_request(p);
+	if (ur) {
+		tcore_user_request_send_response(ur,
+			TRESP_NETWORK_SET_MODE,
+			sizeof(struct tresp_network_set_mode), &resp);
+	}
+}
+
+static void on_response_network_get_mode(TcorePending *p, int data_len, const void *data, void *user_data)
+{
+	UserRequest *ur = NULL;
+	struct tresp_network_get_mode resp = {0};
+	const TcoreATResponse *atResp = data;
+	GSList *tokens = NULL;
+
+	dbg("ENTER on_response_network_get_mode");
+
+	resp.result = TCORE_RETURN_FAILURE;
+
+	if (atResp && atResp->success) {
+		const gchar *line;
+		gint net_mode;
+
+		if (!atResp->lines) {
+			err("invalid response received");
+			goto END;
+		}
+
+		line = (char *) atResp->lines->data;
+		tokens = tcore_at_tok_new(line);
+		if (g_slist_length(tokens) < 1) {
+			err("invalid message");
+			goto END;
+		}
+
+		dbg("RESPONSE OK");
+
+		net_mode = atoi(tcore_at_tok_nth(tokens, 0));
+		dbg("mode = %d", net_mode);
+
+		switch (net_mode) {
+		case 0:
+			resp.mode = NETWORK_MODE_GSM;
+		break;
+		case 1:
+			resp.mode = NETWORK_MODE_AUTO;
+		break;
+		case 2:
+			resp.mode = NETWORK_MODE_WCDMA;
+		break;
+		default:
+			err("Unsupported  mode [%d]", net_mode);
+			goto END;
+		}
+
+		resp.result = TCORE_RETURN_SUCCESS;
+	} else {
+		err("RESPONSE NOK");
+	}
+
+END:
+	ur = tcore_pending_ref_user_request(p);
+	if (ur) {
+		tcore_user_request_send_response(ur,
+			TRESP_NETWORK_GET_MODE,
+			sizeof(struct tresp_network_get_mode), &resp);
+	}
+
+	/* Free resource*/
+	tcore_at_tok_free(tokens);
+}
+
+static void on_response_cancel_manual_search(TcorePending *p, int data_len, const void *data, void *user_data)
+{
+	UserRequest *ur = NULL;
+	struct tresp_network_set_cancel_manual_search resp = {0};
+	const TcoreATResponse *atResp = data;
+	CustomData *custom_data;
+
+	dbg("ENTER on_response_cancel_manual_search");
+
+	if (atResp->success > 0) {
+		dbg("Response OK");
+		resp.result = TCORE_RETURN_SUCCESS;
+	} else {
+		dbg("Response NOK");
+		resp.result = TCORE_RETURN_FAILURE;
+	}
+
+	custom_data = tcore_object_ref_user_data(tcore_pending_ref_core_object(p));
+	custom_data->search_state = IMC_NETWORK_SEARCH_STATE_NO_SEARCH;
+
+	ur = tcore_pending_ref_user_request(p);
+	if (ur) {
+		tcore_user_request_send_response(ur,
+			TRESP_NETWORK_SET_CANCEL_MANUAL_SEARCH,
+			sizeof(struct tresp_network_set_cancel_manual_search), &resp);
+	}
+
+	dbg("Exit on_response_cancel_manual_search");
 }
 
 static gboolean on_event_ps_network_regist(CoreObject *o, const void *data, void *user_data)
@@ -1235,23 +1435,38 @@ Note: <Act> is supporting from R7 and above Protocol Stack.
 			goto OUT;
 		} else {
 			stat = atoi(pResp);
-			if ((pResp = g_slist_nth_data(tokens, 1)))
-				lac = atoi(pResp);
+			if ((pResp = g_slist_nth_data(tokens, 1))) {
+				pResp = util_removeQuotes(pResp);
+				if (pResp) {
+					lac = strtol(pResp, NULL, 16);
+					g_free(pResp);
+				}
+			}
 
-			if ((pResp = g_slist_nth_data(tokens, 2)))
-				ci = atoi(pResp);
-			else
+			if ((pResp = g_slist_nth_data(tokens, 2))) {
+				pResp = util_removeQuotes(pResp);
+				if (pResp) {
+					ci = strtol(pResp, NULL, 16);
+					g_free(pResp);
+				}
+			} else {
 				dbg("No ci in +CGREG");
+			}
 
 			if ((pResp = g_slist_nth_data(tokens, 3)))
 				AcT = atoi(pResp);
 			else
 				dbg("No AcT in +CGREG");
 
-			if ((pResp = g_slist_nth_data(tokens, 4)))
-				rac = atoi(pResp);
-			else
+			if ((pResp = g_slist_nth_data(tokens, 4))) {
+				pResp = util_removeQuotes(pResp);
+				if (pResp) {
+					rac = strtol(pResp, NULL, 16);
+					g_free(pResp);
+				}
+			} else {
 				dbg("No rac in +CGREG");
+			}
 		}
 
 
@@ -1266,11 +1481,6 @@ Note: <Act> is supporting from R7 and above Protocol Stack.
 
 		act = lookup_tbl_access_technology[AcT];
 		tcore_network_set_access_technology(o, act);
-
-		if (stat == AT_CREG_STAT_REG_ROAM)
-			tcore_network_set_roaming_state(o, TRUE);
-		else
-			tcore_network_set_roaming_state(o, FALSE);
 
 		tcore_network_get_service_type(o, &service_type);
 		dbg("prev_service_type = 0x%x", service_type);
@@ -1294,13 +1504,48 @@ Note: <Act> is supporting from R7 and above Protocol Stack.
 		regist_status.roaming_status = tcore_network_get_roaming_state(o);
 
 		tcore_server_send_notification(tcore_plugin_ref_server(tcore_object_ref_plugin(o)), o,
-									   TNOTI_NETWORK_REGISTRATION_STATUS, sizeof(struct tnoti_network_registration_status), &regist_status);
-
+									   TNOTI_NETWORK_REGISTRATION_STATUS, sizeof(regist_status), &regist_status);
+#if 0
 		if (service_type == NETWORK_SERVICE_TYPE_HSDPA)
 			noti.status = TELEPHONY_HSDPA_ON;
 		else
 			noti.status = TELEPHONY_HSDPA_OFF;
-
+#else
+		switch(AcT){
+			case AT_COPS_ACT_GSM:/*Fall Through*/
+			case AT_COPS_ACT_GSM_COMPACT:/*Fall Through*/
+			case AT_COPS_ACT_UTRAN:/*Fall Through*/
+			case AT_COPS_ACT_GSM_EGPRS:/*Fall Through*/
+			case AT_COPS_ACT_E_UTRAN:
+			{
+				dbg("Not required for Protocol Status Notification");
+				goto OUT;
+			}
+			case AT_COPS_ACT_UTRAN_HSDPA:
+			{
+				dbg("HSDPA");
+				noti.status = TELEPHONY_HSDPA_ON;
+				break;
+			}
+			case AT_COPS_ACT_UTRAN_HSUPA:
+			{
+				dbg("HSUPA");
+				noti.status = TELEPHONY_HSUPA_ON;
+				break;
+			}
+			case AT_COPS_ACT_UTRAN_HSDPA_HSUPA:
+			{
+				dbg("HSPA");
+				noti.status = TELEPHONY_HSPA_ON;
+				break;
+			}
+			default:
+			{
+				dbg("Ignore");
+				goto OUT;
+			}
+		}
+#endif
 		tcore_server_send_notification(tcore_plugin_ref_server(tcore_object_ref_plugin(o)), o, TNOTI_PS_PROTOCOL_STATUS,
 									   sizeof(struct tnoti_ps_protocol_status), &noti);
 
@@ -1381,13 +1626,23 @@ Note: <Act> is supporting from R7 and above Protocol Stack.
 			goto OUT;
 		} else {
 			stat = atoi(pResp);
-			if ((pResp = g_slist_nth_data(tokens, 1)))
-				lac = atoi(pResp);
+			if ((pResp = g_slist_nth_data(tokens, 1))) {
+				pResp = util_removeQuotes(pResp);
+				if (pResp) {
+					lac = strtol(pResp, NULL, 16);
+					g_free(pResp);
+				}
+			}
 
-			if ((pResp = g_slist_nth_data(tokens, 2)))
-				ci = atoi(pResp);
-			else
+			if ((pResp = g_slist_nth_data(tokens, 2))) {
+				pResp = util_removeQuotes(pResp);
+				if (pResp) {
+					ci = strtol(pResp, NULL, 16);
+					g_free(pResp);
+				}
+			} else {
 				dbg("No ci in +CREG");
+			}
 
 			if ((pResp = g_slist_nth_data(tokens, 3)))
 				AcT = atoi(pResp);
@@ -1407,10 +1662,13 @@ Note: <Act> is supporting from R7 and above Protocol Stack.
 		act = lookup_tbl_access_technology[AcT];
 		tcore_network_set_access_technology(o, act);
 
-		if (stat == AT_CREG_STAT_REG_ROAM)
+		if (stat == AT_CREG_STAT_REG_ROAM) {
 			tcore_network_set_roaming_state(o, TRUE);
-		else
+		}else if ((stat == AT_CREG_STAT_REG_DENIED) && (TRUE == tcore_network_get_roaming_state(o))) {
+			dbg("Ignore roaming set with REG_DENIED when previous state is REG_ROAM");
+		}else {
 			tcore_network_set_roaming_state(o, FALSE);
+		}
 
 		tcore_network_get_service_type(o, &service_type);
 		dbg("prev_service_type = 0x%x", service_type);
@@ -1527,12 +1785,13 @@ static gboolean on_event_network_ctzv_time_info(CoreObject *o, const void *event
 /*
 +CTZV: <tz>,<time>
 <tz> integer value indicating the time zone (e.g. -22 or +34)
-<time> string type value; format is yy/MM/dd,hh:mms, wherein characters indicates year, month, day, hour,
-minutes, seconds.
-*/
+<time> string type value; format is yy/MM/dd,hh:mms, wherein characters indicates year, month, day, hour,
+minutes, seconds.*/
+
 	dbg("Network time info (+CTZV) recieved");
 
 	if (line != NULL) {
+		gchar *plmn_str = NULL;
 		dbg("Response OK");
 		dbg("noti line is %s", line);
 
@@ -1547,8 +1806,11 @@ minutes, seconds.
 			net_time_info.gmtoff = atoi(time_zone) * 15; /* TZ in minutes */
 		}
 
-		if (tcore_network_get_plmn(o) != NULL)
-			strcpy(net_time_info.plmn, tcore_network_get_plmn(o));
+		plmn_str = tcore_network_get_plmn(o);
+		if (plmn_str != NULL) {
+			g_strlcpy(net_time_info.plmn, plmn_str, sizeof(net_time_info.plmn));
+			g_free(plmn_str);
+		}
 
 		if ((time = g_slist_nth_data(tokens, 1)) && (strlen(time) > 18)) {
 			strncpy(ptime_param, time + 1, 2); /* skip past initial quote (") */
@@ -1574,7 +1836,7 @@ minutes, seconds.
 		dbg("new pending(AT+XOPS=0/5/6 for Nitz PLMN name)");
 
 		/* Get NITZ name and plmn_id via AT+XCOPS = 0/5/6 */
-		nwk_prepare_and_send_pending_request(tcore_object_ref_plugin(o), "umts_network", "AT+XCOPS=0;+XCOPS=5;+XCOPS=6", "+XCOPS", TCORE_AT_MULTILINE, ur, on_response_get_nitz_name);
+		nwk_prepare_and_send_pending_request(o, "AT+XCOPS=0;+XCOPS=5;+XCOPS=6", "+XCOPS", TCORE_AT_MULTILINE, ur, on_response_get_nitz_name);
 	} else {
 		dbg("line is  NULL");
 	}
@@ -1617,6 +1879,10 @@ static void on_sim_resp_hook_get_netname(UserRequest *ur, enum tcore_response_co
 		if ((resp->data.spn.display_condition & 0x03) == 0x01) {
 			tcore_network_set_network_name_priority(o, TCORE_NETWORK_NAME_PRIORITY_ANY);
 		}
+
+		// fallback in case no SPN name is provided
+		if (resp->data.spn.spn[0] == '\0')
+			tcore_network_set_network_name_priority(o, TCORE_NETWORK_NAME_PRIORITY_NETWORK);
 	}
 }
 
@@ -1641,27 +1907,46 @@ static TReturn search_network(CoreObject *o, UserRequest *ur)
 	TcoreHal *h = NULL;
 	TcorePending *pending = NULL;
 	TcoreATRequest *atreq = NULL;
-
+	CustomData *custom_data;
 	char *cmd_str = NULL;
+
 	dbg("search_network - ENTER!!");
 
 	if (!o || !ur)
 		return TCORE_RETURN_EINVAL;
 
+	custom_data = tcore_object_ref_user_data(o);
+	if (custom_data->search_state
+			== IMC_NETWORK_SEARCH_STATE_IN_PROGRESS) {
+		warn("Network Search: [ALREADY IN PROGRESS]");
+		return TCORE_RETURN_FAILURE;
+	}
+
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
+
 	pending = tcore_pending_new(o, 0);
 
 	cmd_str = g_strdup_printf("AT+COPS=?");
 	atreq = tcore_at_request_new(cmd_str, "+COPS", TCORE_AT_SINGLELINE);
 
 	tcore_pending_set_request_data(pending, 0, atreq);
+	tcore_pending_set_timeout(pending, 150);
 	tcore_pending_set_priority(pending, TCORE_PENDING_PRIORITY_DEFAULT);
 	tcore_pending_set_response_callback(pending, on_response_search_network, NULL);
+	tcore_pending_set_timeout_callback(pending, on_timeout_search_network, NULL);
 	tcore_pending_link_user_request(pending, ur);
 	tcore_pending_set_send_callback(pending, on_confirmation_network_message_send, NULL);
 
 	tcore_hal_send_request(h, pending);
 	g_free(cmd_str);
+
+	custom_data->search_state = IMC_NETWORK_SEARCH_STATE_IN_PROGRESS;
+	dbg("Search State: [IN PROGRESS]");
+
 	return TCORE_RETURN_SUCCESS;
 }
 
@@ -1686,6 +1971,10 @@ static TReturn set_plmn_selection_mode(CoreObject *o, UserRequest *ur)
 
 	req_data = tcore_user_request_ref_data(ur, NULL);
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
 	pending = tcore_pending_new(o, 0);
 
 	// Command Format - AT+COPS=[<mode>[,<format>[,<oper>[,< AcT>]]]]
@@ -1701,7 +1990,7 @@ static TReturn set_plmn_selection_mode(CoreObject *o, UserRequest *ur)
 		act = 2;
 
 	switch (req_data->mode) {
-	case NETWORK_SELECT_MODE_GSM_MANUAL:
+	case NETWORK_SELECT_MODE_MANUAL:
 	{
 		mode = AT_COPS_MODE_MANUAL;
 		format = AT_COPS_FORMAT_NUMERIC;
@@ -1718,7 +2007,7 @@ static TReturn set_plmn_selection_mode(CoreObject *o, UserRequest *ur)
 	}
 	break;
 
-	case NETWORK_SELECT_MODE_GLOBAL_AUTOMATIC:
+	case NETWORK_SELECT_MODE_AUTOMATIC:
 	default:
 		cmd_str = g_strdup("AT+COPS=0");
 		break;
@@ -1750,6 +2039,10 @@ static TReturn get_plmn_selection_mode(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_EINVAL;
 
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
 	pending = tcore_pending_new(o, 0);
 
 	cmd_str = g_strdup_printf("AT+COPS?");
@@ -1790,6 +2083,10 @@ static TReturn set_band(CoreObject *o, UserRequest *ur)
 
 	req_data = tcore_user_request_ref_data(ur, NULL);
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
 
 	dbg("set_band - called with band = %d", req_data->band);
 
@@ -1931,7 +2228,6 @@ static TReturn get_band(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *h = NULL;
 	TcorePending *pending = NULL;
-
 	TcoreATRequest *atreq;
 	char *cmd_str = NULL;
 	dbg("get_band - ENTER!!");
@@ -1940,6 +2236,10 @@ static TReturn get_band(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_EINVAL;
 
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
 
 	/* Get RAT Information Information. Based on RAT read response, we will get specific RAT bands only */
 	cmd_str = g_strdup_printf("AT+XRAT?");
@@ -1958,7 +2258,6 @@ static TReturn get_band(CoreObject *o, UserRequest *ur)
 static TReturn set_preferred_plmn(CoreObject *o, UserRequest *ur)
 {
 	TcoreHal *h = NULL;
-	TcorePlugin *p = NULL;
 	TcorePending *pending = NULL;
 	TcoreATRequest *atreq = NULL;
 	struct treq_network_set_preferred_plmn *req_data = NULL;
@@ -1971,14 +2270,16 @@ static TReturn set_preferred_plmn(CoreObject *o, UserRequest *ur)
 	if (!o || !ur)
 		return TCORE_RETURN_EINVAL;
 
+	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
+
 	req_data = (struct treq_network_set_preferred_plmn *) tcore_user_request_ref_data(ur, NULL);
 	pending = tcore_pending_new(o, 0);
 
 	dbg("Entry set_preferred_plmn");
-
-	p = tcore_object_ref_plugin(o);
-	h = tcore_object_get_hal(o);
-
 /*
 AT+CPOL=
 [<index>][,<format>[,<oper>[,<GSM_AcT>,
@@ -2032,9 +2333,14 @@ static TReturn get_preferred_plmn(CoreObject *o, UserRequest *ur)
 		return TCORE_RETURN_EINVAL;
 
 	h = tcore_object_get_hal(o);
+	if(FALSE == tcore_hal_get_power_state(h)){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
+
 	pending = tcore_pending_new(o, 0);
 
-	cmd_str = g_strdup_printf("AT+CPOL?");
+	cmd_str = g_strdup_printf("AT+CPOL=,2;+CPOL?");
 	atreq = tcore_at_request_new(cmd_str, "+CPOL", TCORE_AT_MULTILINE);
 
 	tcore_pending_set_request_data(pending, 0, atreq);
@@ -2051,6 +2357,49 @@ static TReturn get_preferred_plmn(CoreObject *o, UserRequest *ur)
 	return TCORE_RETURN_SUCCESS;
 }
 
+static TReturn cancel_manual_search (CoreObject *o, UserRequest *ur)
+{
+	TcoreHal *h = NULL;
+	TcorePending *pending = NULL;
+	TcoreATRequest *atreq = NULL;
+	CustomData *custom_data;
+
+	dbg("cancel_manual_search - ENTER!!");
+
+	if (!o || !ur)
+		return TCORE_RETURN_EINVAL;
+
+	h = tcore_object_get_hal(o);
+	if (FALSE == tcore_hal_get_power_state(h)) {
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
+
+	custom_data = tcore_object_ref_user_data(o);
+	if (custom_data->search_state
+			== IMC_NETWORK_SEARCH_STATE_IN_PROGRESS) {
+		dbg("Search in Progress...");
+
+		pending = tcore_pending_new(o, 0);
+		atreq = tcore_at_request_new("\e", NULL, TCORE_AT_NO_RESULT);
+
+		tcore_pending_set_request_data(pending, 0, atreq);
+		tcore_pending_set_response_callback(pending, on_response_cancel_manual_search, NULL);
+		tcore_pending_link_user_request(pending, ur);
+		tcore_pending_set_send_callback(pending, on_confirmation_network_message_send, NULL);
+
+		tcore_hal_send_request(h, pending);
+
+		/*Set the Search State to Cancelled*/
+		custom_data->search_state = IMC_NETWORK_SEARCH_STATE_CANCELLED;
+		dbg("Search State: [CANCELLED]");
+	} else {
+		dbg("No Search in Progress...");
+	}
+
+	return TCORE_RETURN_SUCCESS;
+}
+
 static TReturn get_serving_network(CoreObject *o, UserRequest *ur)
 {
 	dbg("get_serving_network - ENTER!!");
@@ -2058,9 +2407,96 @@ static TReturn get_serving_network(CoreObject *o, UserRequest *ur)
 	if (!o)
 		return TCORE_RETURN_EINVAL;
 
+	if(FALSE == tcore_hal_get_power_state(tcore_object_get_hal(o))){
+		dbg("cp not ready/n");
+		return TCORE_RETURN_ENOSYS;
+	}
+
 	dbg("new pending(AT+COPS?)");
 
-	nwk_prepare_and_send_pending_request(tcore_object_ref_plugin(o), "umts_network", "AT+COPS=3,2;+COPS?;+COPS=3,0;+COPS?", "+COPS", TCORE_AT_MULTILINE, ur, on_response_get_serving_network);
+	nwk_prepare_and_send_pending_request(o, "AT+COPS=3,2;+COPS?;+COPS=3,0;+COPS?", "+COPS", TCORE_AT_MULTILINE, ur, on_response_get_serving_network);
+	return TCORE_RETURN_SUCCESS;
+}
+
+static TReturn network_set_mode(CoreObject *o, UserRequest *ur)
+{
+	struct treq_network_set_mode *set_mode = NULL;
+	TReturn ret = TCORE_RETURN_EINVAL;
+	int act;
+	gchar *at_cmd;
+
+	dbg("network_set_mode - ENTER!!");
+
+	set_mode = (struct treq_network_set_mode *)tcore_user_request_ref_data(ur, NULL);
+
+	switch (set_mode->mode) {
+	case NETWORK_MODE_AUTO:
+		act = 1;
+	break;
+	case NETWORK_MODE_GSM:
+		act = 0;
+	break;
+	case NETWORK_MODE_WCDMA:
+		act = 2;
+	break;
+	case NETWORK_MODE_LTE:
+	default:
+		err("Unsupported  mode: [%d]", set_mode->mode);
+		return ret;
+	}
+
+	if (act == 1)
+		/* AT-Command */
+		at_cmd = g_strdup_printf("AT+XRAT=%d,2", act); //PreferredAct is UMTS
+	else
+		/* AT-Command */
+		at_cmd = g_strdup_printf("AT+XRAT=%d", act);
+
+	/* Send Request to modem */
+	ret = tcore_prepare_and_send_at_request(o,
+		at_cmd, NULL,
+		TCORE_AT_NO_RESULT,
+		ur,
+		on_response_network_set_mode, NULL,
+		on_confirmation_network_message_send, NULL,
+		0, NULL, NULL);
+
+	g_free(at_cmd);
+	return ret;
+}
+
+static TReturn network_get_mode(CoreObject *o, UserRequest *ur)
+{
+	TReturn ret;
+
+	dbg("network_get_mode - ENTER!!");
+
+	/* Send Request to modem */
+	ret = tcore_prepare_and_send_at_request(o,
+		"AT+XRAT?", "+XRAT",
+		TCORE_AT_SINGLELINE,
+		ur,
+		on_response_network_get_mode, NULL,
+		on_confirmation_network_message_send, NULL,
+		0, NULL, NULL);
+
+	return ret;
+}
+
+static TReturn get_default_data_subscription(CoreObject *co, UserRequest *ur)
+{
+	struct tresp_network_get_default_data_subs resp = {0,};
+
+	dbg("Enter");
+
+	resp.result = TCORE_RETURN_SUCCESS;
+	resp.default_subs = NETWORK_DEFAULT_DATA_SUBS_SIM1;
+
+	if( TCORE_RETURN_SUCCESS ==  tcore_user_request_send_response(ur,
+			TRESP_NETWORK_GET_DEFAULT_DATA_SUBSCRIPTION,
+			sizeof(struct tresp_network_get_default_data_subs), &resp)){
+			tcore_user_request_unref(ur);
+	}
 	return TCORE_RETURN_SUCCESS;
 }
 
@@ -2078,37 +2514,55 @@ static struct tcore_network_operations network_ops = {
 	.get_order = NULL,
 	.set_power_on_attach = NULL,
 	.get_power_on_attach = NULL,
-	.set_cancel_manual_search = NULL,
+	.set_cancel_manual_search = cancel_manual_search,
 	.get_serving_network = get_serving_network,
+	.set_mode = network_set_mode,
+	.get_mode = network_get_mode,
+	.set_default_data_subscription = NULL,
+	.get_default_data_subscription =get_default_data_subscription,
 };
 
-gboolean s_network_init(TcorePlugin *p, TcoreHal *h)
+gboolean imc_network_init(TcorePlugin *cp, CoreObject *co_network)
 {
-	CoreObject *o = NULL;
+	CustomData *custom_data;
+	dbg("Enter");
 
-	o = tcore_network_new(p, "umts_network", &network_ops, h);
-	if (!o)
+	/* Set operations */
+	tcore_network_set_ops(co_network, &network_ops);
+
+	/* Custom data */
+	custom_data = g_malloc0(sizeof(CustomData));
+	if (custom_data == NULL) {
+		err("Memory allocation failed!!");
 		return FALSE;
+	}
+	custom_data->search_state = IMC_NETWORK_SEARCH_STATE_NO_SEARCH;
 
-	tcore_object_add_callback(o, "+CREG", on_event_cs_network_regist, NULL);
-	tcore_object_add_callback(o, "+CGREG", on_event_ps_network_regist, NULL);
-	tcore_object_add_callback(o, "+XCIEV", on_event_network_icon_info, NULL);
+	tcore_object_link_user_data(co_network, custom_data);
+
+	tcore_object_add_callback(co_network, "+CREG", on_event_cs_network_regist, NULL);
+	tcore_object_add_callback(co_network, "+CGREG", on_event_ps_network_regist, NULL);
+	tcore_object_add_callback(co_network, "+XCIEV", on_event_network_icon_info, NULL);
 
 	/* +CTZV: <tz>,<time> */
-	tcore_object_add_callback(o, "+CTZV", on_event_network_ctzv_time_info, NULL);
+	tcore_object_add_callback(co_network, "+CTZV", on_event_network_ctzv_time_info, NULL);
 
-	tcore_server_add_notification_hook(tcore_plugin_ref_server(p), TNOTI_SIM_STATUS, on_hook_sim_init, o);
+	tcore_server_add_notification_hook(tcore_plugin_ref_server(cp), TNOTI_SIM_STATUS, on_hook_sim_init, co_network);
 
-	_insert_mcc_mnc_oper_list(p, o);
+	_insert_mcc_mnc_oper_list(cp, co_network);
+
+	dbg("Exit");
 
 	return TRUE;
 }
 
-void s_network_exit(TcorePlugin *p)
+void imc_network_exit(TcorePlugin *cp, CoreObject *co_network)
 {
-	CoreObject *o;
+	CustomData *custom_data;
 
-	o = tcore_plugin_ref_core_object(p, "umts_network");
+	custom_data = tcore_object_ref_user_data(co_network);
+	if (custom_data != NULL)
+		g_free(custom_data);
 
-	tcore_network_free(o);
+	dbg("Exit");
 }

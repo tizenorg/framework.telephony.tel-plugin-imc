@@ -23,11 +23,10 @@
 #include <stdlib.h>
 
 #include <glib.h>
+#include <log.h>
 
 
-#include "s_common.h"
-
-#include <plugin.h>
+#include "imc_common.h"
 
 #undef  MAX
 #define MAX(a, b)  (((a) > (b)) ? (a) : (b))
@@ -48,6 +47,8 @@
 	((((signed) (shift)) < 0) ?		  \
 	 MASK((width), (offset), (data)) << -(shift) :	\
 	 MASK((width), (offset), (data)) >> (((signed) (shift)))) \
+
+#define TAB_SPACE	"  "
 
 char _util_unpackb(const char *src, int pos, int len);
 char _util_convert_byte_hexChar(char val);
@@ -70,7 +71,7 @@ void util_hex_dump(char *pad, int size, const void *data)
 	snprintf(buf, 255, "%s%04X: ", pad, 0);
 	for (i = 0; i < size; i++) {
 		snprintf(hex, 4, "%02X ", p[i]);
-		strcat(buf, hex);
+		strncat(buf, hex, strlen(hex));
 
 		if ((i + 1) % 8 == 0) {
 			if ((i + 1) % 16 == 0) {
@@ -78,104 +79,12 @@ void util_hex_dump(char *pad, int size, const void *data)
 				memset(buf, 0, 255);
 				snprintf(buf, 255, "%s%04X: ", pad, i + 1);
 			} else {
-				strcat(buf, "  ");
+				strncat(buf, TAB_SPACE, strlen(TAB_SPACE));
 			}
 		}
 	}
 
 	msg("%s", buf);
-}
-
-void hook_hex_dump(enum direction_e d, int size, const void *data)
-{
-	msg("=== TX data DUMP =====");
-	util_hex_dump("          ", size, data);
-	msg("=== TX data DUMP =====");
-}
-
-unsigned int util_assign_message_sequence_id(TcorePlugin *p)
-{
-	struct global_data *gd;
-
-	if (!p) {
-		dbg("plugin is NULL");
-		return -1;
-	}
-
-	gd = tcore_plugin_ref_user_data(p);
-	if (!gd) {
-		dbg("global data is NULL");
-		return -1;
-	}
-
-	if (gd->msg_auto_id_current == 0) {
-		gd->msg_auto_id_current = gd->msg_auto_id_start;
-		dbg("pending_auto_id_current is 0, reset to start");
-	} else if (gd->msg_auto_id_current >= gd->msg_auto_id_end) {
-		gd->msg_auto_id_current = gd->msg_auto_id_start;
-		dbg("pending_auto_id_current is over, reset to start");
-	} else {
-		gd->msg_auto_id_current++;
-	}
-
-	dbg("message_sequence_id = %d", gd->msg_auto_id_current);
-
-	return gd->msg_auto_id_current;
-}
-
-gboolean util_add_waiting_job(GQueue *queue, unsigned int id, UserRequest *ur)
-{
-	struct work_queue_data *wqd;
-
-	if (!queue)
-		return FALSE;
-
-	wqd = calloc(sizeof(struct work_queue_data), 1);
-	if (!wqd)
-		return FALSE;
-
-	wqd->id = id;
-	wqd->ur = tcore_user_request_ref(ur);
-	g_queue_push_tail(queue, wqd);
-
-	dbg("id = %d, ur = 0x%x", wqd->id, wqd->ur);
-	return TRUE;
-}
-
-UserRequest* util_pop_waiting_job(GQueue *queue, unsigned int id)
-{
-	int i = 0;
-	UserRequest *ur;
-	struct work_queue_data *wqd;
-
-	if (!queue)
-		return NULL;
-
-
-	dbg("before waiting job count: %d", g_queue_get_length(queue));
-
-	do {
-		wqd = g_queue_peek_nth(queue, i);
-		if (!wqd)
-			return NULL;
-
-		if (wqd->id == id) {
-			wqd = g_queue_pop_nth(queue, i);
-			break;
-		}
-
-		i++;
-	} while (wqd != NULL);
-
-	dbg("after  waiting job count: %d", g_queue_get_length(queue));
-
-	if (!wqd)
-		return NULL;
-
-	ur = wqd->ur;
-	free(wqd);
-
-	return ur;
 }
 
 unsigned char util_hexCharToInt(char c)
@@ -192,6 +101,30 @@ unsigned char util_hexCharToInt(char c)
 	}
 }
 
+char *util_hex_to_string(const char *src, unsigned int src_len)
+{
+	char *dest;
+	unsigned int i;
+
+	if (src == NULL)
+		return NULL;
+
+	dest = g_malloc0(src_len * 2 + 1);
+	if (dest == NULL) {
+		err("Memory allocation failed!!");
+		return NULL;
+	}
+
+	for (i = 0; i < src_len; i++) {
+		snprintf(dest + (i * 2), (src_len * 2 + 1) - (i * 2),
+			"%02x", (unsigned char)src[i]);
+	}
+
+	dest[src_len * 2] = '\0';
+
+	return dest;
+}
+
 char* util_hexStringToBytes(char *s)
 {
 	char *ret;
@@ -203,13 +136,17 @@ char* util_hexStringToBytes(char *s)
 
 	sz = strlen(s);
 
-	ret = calloc((sz / 2) + 1, 1);
+	ret = g_malloc0((sz / 2) + 1);
+	if (ret == NULL) {
+		err("Memory allocation failed!!");
+		return NULL;
+	}
 
 	dbg("Convert String to Binary!!");
 
 	for (i = 0; i < sz; i += 2) {
 		ret[i / 2] = (char) ((util_hexCharToInt(s[i]) << 4) | util_hexCharToInt(s[i + 1]));
-		dbg("[%02x]", ret[i / 2]);
+		msg("		[%02x]", ret[i / 2]);
 	}
 
 	return ret;
@@ -226,9 +163,9 @@ char _util_unpackb(const char *src, int pos, int len)
 	rshift = MAX(8 - (pos + len), 0);
 
 	if (rshift > 0) {
-		result = MASK_AND_SHIFT(len, pos, rshift, *src);
+		result = MASK_AND_SHIFT(len, pos, rshift, (unsigned char)*src);
 	} else {
-		result = MASK(8 - pos, pos, *src);
+		result = MASK(8 - pos, pos, (unsigned char)*src);
 		src++;
 		len -= 8 - pos;
 
@@ -278,9 +215,14 @@ char* util_removeQuotes(void *data)
 	if (data_len <= 0) {
 		return NULL;
 	}
-	tmp = calloc(1, data_len - 1);
+
+	tmp = g_malloc0(data_len - 1);
+	if (tmp == NULL) {
+		err("Memory allocation failed!!");
+		return NULL;
+	}
 	memcpy(tmp, data + 1, data_len - 2);
-	dbg("tmp: %s", tmp);
+	dbg("tmp: [%s]", tmp);
 
 	return tmp;
 }

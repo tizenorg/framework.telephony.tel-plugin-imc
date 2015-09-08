@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Ja-young Gu <jygu@samsung.com>
+ * Contact: Hayoon Ko <hayoon.ko@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,15 @@
  * limitations under the License.
  */
 
-#ifndef __S_DISPATCH_H__
-#define __S_DISPATCH_H__
+#ifndef __IMC_COMMON_H__
+#define __IMC_COMMON_H__
 
-void do_factory(TcoreHal *h, const ipc_message_type *ipc);
-void do_notification_message(TcorePlugin *p, const ipc_message_type *ipc);
-void do_notification_sys_message(TcorePlugin *p, const void *data);
+#include <glib.h>
 
-#endif
+void util_hex_dump(char *pad, int size, const void *data);
+unsigned char util_hexCharToInt(char c);
+char *util_hex_to_string(const char *src, unsigned int src_len);
+char* util_hexStringToBytes(char *s);
+char* util_removeQuotes(void *data);
+
+#endif	// __IMC_COMMON_H__

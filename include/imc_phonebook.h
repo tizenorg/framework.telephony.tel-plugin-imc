@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Harish Bishnoi <hbishnoi@samsung.com>
+ * Contact: Ja-young Gu <jygu@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,11 +18,10 @@
  * limitations under the License.
  */
 
+#ifndef __IMC_PHONEBOOK_H__
+#define __IMC_PHONEBOOK_H__
 
-#ifndef S_SAT_H_
-#define S_SAT_H_
+gboolean imc_phonebook_init(TcorePlugin *cp, CoreObject *co_phonebook);
+void imc_phonebook_exit(TcorePlugin *cp, CoreObject *co_phonebook);
 
-gboolean s_sat_init(TcorePlugin *p, TcoreHal *h);
-void s_sat_exit(TcorePlugin *p);
-
-#endif /* S_SAT_H_ */
+#endif /* __IMC_PHONEBOOK_H__ */

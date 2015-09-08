@@ -18,10 +18,13 @@
  * limitations under the License.
  */
 
-#ifndef S_SAP_H_
-#define S_SAP_H_
+#ifndef __IMC_MODEM_H__
+#define __IMC_MODEM_H__
 
-gboolean s_sap_init(TcorePlugin *p, TcoreHal *h);
-void s_sap_exit(TcorePlugin *p);
+gboolean imc_modem_init(TcorePlugin *cp, CoreObject *co_modem);
+void imc_modem_exit(TcorePlugin *cp, CoreObject *co_modem);
 
-#endif /* S_SAP_H_ */
+gboolean modem_power_on(TcorePlugin *plugin);
+void modem_register_nvm(CoreObject *co_modem);
+
+#endif	// __IMC_MODEM_H__

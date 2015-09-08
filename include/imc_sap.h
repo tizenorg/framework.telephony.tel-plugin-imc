@@ -3,7 +3,7 @@
  *
  * Copyright (c) 2012 Samsung Electronics Co., Ltd. All rights reserved.
  *
- * Contact: Arun Shukla <arun.shukla@samsung.com>
+ * Contact: Hayoon Ko <hayoon.ko@samsung.com>
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,10 @@
  * limitations under the License.
  */
 
-#ifndef __S_GPS_H__
-#define __S_GPS_H__
+#ifndef __IMC_SAP_H__
+#define __IMC_SAP_H__
 
-gboolean s_gps_init(TcorePlugin *p, TcoreHal *h);
-void s_gps_exit(TcorePlugin *p);
+gboolean imc_sap_init(TcorePlugin *cp, CoreObject *co_sap);
+void imc_sap_exit(TcorePlugin *cp, CoreObject *co_sap);
 
-#endif
+#endif /* __IMC_SAP_H__ */
